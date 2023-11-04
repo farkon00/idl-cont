@@ -1,0 +1,22 @@
+{
+  "name": "idl-cont",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/farkon00/idl-cont.git"
+  },
+  "author": "farkon00",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/farkon00/idl-cont/issues"
+  },
+  "homepage": "https://github.com/farkon00/idl-cont#readme",
+  "dependencies": {
+    "webidl2": "^24.4.1"
+  }
+}
