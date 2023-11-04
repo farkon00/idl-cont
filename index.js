@@ -21,7 +21,7 @@ function toSnakeCase(originalName) {
         if (!isUpperCase(originalName[i]))
             output += originalName[i];
         else {
-            if (i == 0)
+            if (i == 0 || i == originalName.length - 1)
                 output += originalName[i].toLowerCase();
             else {
                 if (i + 1 < originalName.length && isUpperCase(originalName[i + 1]) && isUpperCase(originalName[i - 1]))
