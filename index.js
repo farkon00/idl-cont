@@ -4,13 +4,80 @@ const { readFileSync, writeFileSync } = require("fs");
 
 const namePrefix = process.argv[4];
 
+const INT_TYPES = ["short", "long", "unsigned short", "unsigned long", "boolean"]
+const STRING_TYPES = ["DOMString", "USVString"]
+
+function isUpperCase(str) {
+    return str == str.toUpperCase();
+}
+
+/**
+ * Converts the name in camelCase to snake_case
+ * @param {string} originalName 
+ */
+function toSnakeCase(originalName) {
+    let output = "";
+    for (let i = 0; i < originalName.length; i++) {
+        if (!isUpperCase(originalName[i]))
+            output += originalName[i];
+        else {
+            if (i == 0)
+                output += originalName[i].toLowerCase();
+            else {
+                if (i + 1 < originalName.length && isUpperCase(originalName[i + 1]) && isUpperCase(originalName[i - 1]))
+                    output += originalName[i].toLowerCase();
+                else
+                    output += "_" + originalName[i].toLowerCase();
+            }
+        }
+    }
+    return output;
+}
+
+/**
+ * @param {WebIDL2.InterfaceType} decl
+ */
 function handleInterface(decl) {
+    
     let output = "";
     if (decl.inheritance != "")
         output += `struct (${namePrefix}${decl.inheritance}) ${namePrefix}${decl.name}\n`;
     else
         output += `struct ${namePrefix}${decl.name}\n`;
-    output += "end\n";
+    decl.members.forEach(member => {
+        if (member.type == "attribute") {
+            if (member.special == "static") {
+                console.log(`Static attributes are not supported: ${decl.name}.${member.name}`);
+                return
+            }
+            output += `  sproc ${toSnakeCase(member.name)} -> `
+            if (member.idlType.union)
+                output += `JSValue:
+    "${member.name}" self.get
+  end\n`
+            else if (INT_TYPES.includes(member.idlType.idlType))
+                output += `int:
+    "${member.name}" self.get JSInt.unwrap dup .value swap .free
+  end\n`;
+            else if (STRING_TYPES.includes(member.idlType.idlType))
+                output += `@str:
+    "${member.name}" self.get JSString.unwrap let string; string.value string free
+  end\n`;
+            else
+                output += `${namePrefix}${member.idlType.idlType}:
+    "${member.name}" self.get ${namePrefix}${member.idlType.idlType}.unwrap
+  end`
+        } else
+            console.log(`Unknown member type: ${member.type} for ${decl.name}.${member.name}`);
+    });
+    output += `
+  static nproc unwrap JSObject self -> ${namePrefix}${decl.name}:
+    "${decl.name}" self.unwrap_as (${namePrefix}${decl.name})
+  end
+  proc full_unwrap JSValue -> ${namePrefix}${decl.name}:
+    JSObject.unwrap ${namePrefix}${decl.name}.unwrap
+  end
+end\n`;
     return output;
 }
 
@@ -18,7 +85,7 @@ function handleDeclaration(decl) {
     if (decl.type == "interface")
         return handleInterface(decl);
     else {
-        console.log("Unknown declaration type:", decl.type);
+        console.log(`Unknown declaration type: ${decl.type} for ${decl.name}`);
         return "";
     }
 }
