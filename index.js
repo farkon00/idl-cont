@@ -51,22 +51,41 @@ function handleInterface(decl) {
                 return
             }
             output += `  sproc ${toSnakeCase(member.name)} -> `
-            if (member.idlType.union)
+            if (member.idlType.union) {
                 output += `JSValue:
     "${member.name}" self.get
   end\n`
-            else if (INT_TYPES.includes(member.idlType.idlType))
+                if (!member.readonly)
+                    output += `  sproc !${toSnakeCase(member.name)} JSValue:
+    "${member.name}" self.set
+  end`
+            } else if (INT_TYPES.includes(member.idlType.idlType)) {
                 output += `int:
     "${member.name}" self.get JSInt.unwrap dup .value swap .free
   end\n`;
-            else if (STRING_TYPES.includes(member.idlType.idlType))
+                if (!member.readonly)
+                    output += `  sproc !${toSnakeCase(member.name)} int:
+    init var value JSInt
+    value "${member.name}" self.set
+  end\n`
+            } else if (STRING_TYPES.includes(member.idlType.idlType)) {
                 output += `@str:
     "${member.name}" self.get JSString.unwrap let string; string.value string free
   end\n`;
-            else
+                if (!member.readonly)
+                    output += `  sproc !${toSnakeCase(member.name)} @str:
+    init var value JSString
+    value "${member.name}" self.set
+  end\n`
+            } else {
                 output += `${namePrefix}${member.idlType.idlType}:
     "${member.name}" self.get ${namePrefix}${member.idlType.idlType}.unwrap
-  end`
+  end\n`
+                if (!member.readonly)
+                    output += `  sproc !${toSnakeCase(member.name)} ${namePrefix}${member.idlType.idlType}:
+    "${member.name}" self.set
+  end\n`
+            }
         } else
             console.log(`Unknown member type: ${member.type} for ${decl.name}.${member.name}`);
     });
