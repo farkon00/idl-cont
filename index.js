@@ -35,11 +35,55 @@ function toSnakeCase(originalName) {
 }
 
 /**
+ * @param {WebIDL2.AttributeMemberType} member 
+ */
+function handleInterfaceAttribute(member) {
+    let output = "";
+    if (member.idlType.union) {
+        output += `JSValue:
+    "${member.name}" self.get
+  end\n`;
+        if (!member.readonly)
+            output += `  sproc !${toSnakeCase(member.name)} JSValue:
+    "${member.name}" self.set
+  end\n`;
+    } else if (INT_TYPES.includes(member.idlType.idlType)) {
+        output += `int:
+    "${member.name}" self.get JSInt.unwrap dup .value swap .free
+  end\n`;
+        if (!member.readonly)
+            output += `  sproc !${toSnakeCase(member.name)} int:
+    init var value JSInt
+    value "${member.name}" self.set
+  end\n`;
+    } else if (STRING_TYPES.includes(member.idlType.idlType)) {
+        output += `@str:
+    "${member.name}" self.get JSString.unwrap let string; string.value string free
+  end\n`;
+        if (!member.readonly)
+            output += `  sproc !${toSnakeCase(member.name)} @str:
+    init var value JSString
+    value "${member.name}" self.set
+  end\n`;
+    } else {
+        output += `${namePrefix}${member.idlType.idlType}:
+    "${member.name}" self.get ${namePrefix}${member.idlType.idlType}.unwrap
+  end\n`;
+        if (!member.readonly)
+            output += `  sproc !${toSnakeCase(member.name)} ${namePrefix}${member.idlType.idlType}:
+    "${member.name}" self.set
+  end\n`;
+    }
+    return output;
+}
+
+/**
  * @param {WebIDL2.InterfaceType} decl
  */
 function handleInterface(decl) {
     
     let output = "";
+    let afterOutput = "";
     if (decl.inheritance != "")
         output += `struct (${namePrefix}${decl.inheritance}) ${namePrefix}${decl.name}\n`;
     else
@@ -48,44 +92,18 @@ function handleInterface(decl) {
         if (member.type == "attribute") {
             if (member.special == "static") {
                 console.log(`Static attributes are not supported: ${decl.name}.${member.name}`);
-                return
+                return;
             }
-            output += `  sproc ${toSnakeCase(member.name)} -> `
-            if (member.idlType.union) {
-                output += `JSValue:
-    "${member.name}" self.get
-  end\n`
-                if (!member.readonly)
-                    output += `  sproc !${toSnakeCase(member.name)} JSValue:
-    "${member.name}" self.set
-  end`
-            } else if (INT_TYPES.includes(member.idlType.idlType)) {
-                output += `int:
-    "${member.name}" self.get JSInt.unwrap dup .value swap .free
-  end\n`;
-                if (!member.readonly)
-                    output += `  sproc !${toSnakeCase(member.name)} int:
-    init var value JSInt
-    value "${member.name}" self.set
-  end\n`
-            } else if (STRING_TYPES.includes(member.idlType.idlType)) {
-                output += `@str:
-    "${member.name}" self.get JSString.unwrap let string; string.value string free
-  end\n`;
-                if (!member.readonly)
-                    output += `  sproc !${toSnakeCase(member.name)} @str:
-    init var value JSString
-    value "${member.name}" self.set
-  end\n`
-            } else {
-                output += `${namePrefix}${member.idlType.idlType}:
-    "${member.name}" self.get ${namePrefix}${member.idlType.idlType}.unwrap
-  end\n`
-                if (!member.readonly)
-                    output += `  sproc !${toSnakeCase(member.name)} ${namePrefix}${member.idlType.idlType}:
-    "${member.name}" self.set
-  end\n`
+            output += `  sproc ${toSnakeCase(member.name)} -> `;
+            output += handleInterfaceAttribute(member);   
+        } else if (member.type == "const") {
+            if (!INT_TYPES.includes(member.idlType.idlType)) {
+                console.log(`Non-int constants are not supported: ${decl.name}.${member.name}`);
+                return;
             }
+            let value = member.value.value;
+            if (member.value.type == "boolean") value = member.value.value == "true" ? 1 : 0; 
+            afterOutput += `const ${namePrefix}${decl.name}.${member.name} ${value};\n`;
         } else
             console.log(`Unknown member type: ${member.type} for ${decl.name}.${member.name}`);
     });
@@ -97,7 +115,7 @@ function handleInterface(decl) {
     JSObject.unwrap ${namePrefix}${decl.name}.unwrap
   end
 end\n`;
-    return output;
+    return output + afterOutput;
 }
 
 function handleDeclaration(decl) {
