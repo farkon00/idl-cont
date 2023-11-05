@@ -57,6 +57,8 @@ end\n`;
   "${member.name}" self.set
 end\n`;
     } else if (INT_TYPES.includes(member.idlType.idlType)) {
+        if (member.idlType.nullable)
+            console.log(`Nullable ints are not supported, intepreting as a regular int in ${owner}.${member.name}`);
         output += `int:
   "${member.name}" self.get JSInt.unwrap dup .value swap .free
 end\n`;
@@ -66,22 +68,62 @@ end\n`;
   value "${member.name}" self.set
 end\n`;
     } else if (STRING_TYPES.includes(member.idlType.idlType)) {
-        output += `@str:
+        if (member.idlType.nullable) {
+            output += `@str:
+  "${member.name}" self.get let res;
+  if JSTypes.Null res.type == do
+    res.free -1 NULL
+  else
+    res JSString.unwrap let string; string.value string free
+  end
+end\n`;
+            if (!member.readonly)
+                output += `nproc [${owner}] !${toSnakeCase(member.name)} @str:
+  if data NULL ptr== do
+    init var null JSNull null
+  else
+    len data init var value JSString value
+  end
+  "${member.name}" self.set
+end\n`;
+        }
+        else {
+            output += `@str:
   "${member.name}" self.get JSString.unwrap let string; string.value string free
 end\n`;
-        if (!member.readonly)
-            output += `sproc [${owner}] !${toSnakeCase(member.name)} @str:
+            if (!member.readonly)
+                output += `sproc [${owner}] !${toSnakeCase(member.name)} @str:
   init var value JSString
   value "${member.name}" self.set
 end\n`;
+        }
     } else {
-        output += `${namePrefix}${member.idlType.idlType}:
-  "${member.name}" self.get ${namePrefix}${member.idlType.idlType}.full_unwrap
+        if (member.idlType.nullable) {
+            output += `@str:
+  "${member.name}" self.get let res;
+  if JSTypes.Null res.type == do
+    res.free NULL
+  else
+    res ${namePrefix}${member.idlType.idlType}.full_unwrap
+  end
 end\n`;
-        if (!member.readonly)
-            output += `sproc [${owner}] !${toSnakeCase(member.name)} ${namePrefix}${member.idlType.idlType}:
+            if (!member.readonly)
+                output += `nproc [${owner}] !${toSnakeCase(member.name)} ${namePrefix}${member.idlType.idlType} val:
+  if NULL val ptr== do
+    init var null JSNull
+    null
+  else val end
   "${member.name}" self.set
 end\n`;
+        } else {
+            output += `${namePrefix}${member.idlType.idlType}:
+  "${member.name}" self.get ${namePrefix}${member.idlType.idlType}.full_unwrap
+end\n`;
+            if (!member.readonly)
+                output += `sproc [${owner}] !${toSnakeCase(member.name)} ${namePrefix}${member.idlType.idlType}:
+  "${member.name}" self.set
+end\n`;
+        }
     }
     return output;
 }
@@ -124,14 +166,27 @@ function loadIntoJS(type, argNum) {
         console.log(`Generic types are not supported: ${type.generic}`);
         return "";
     }
-    if (type.union || type.idlType === "undefined")
-        return `  let arg${argNum};\n`;
-    else if (INT_TYPES.includes(type.idlType))
+    if (INT_TYPES.includes(type.idlType)) {
+        if (type.nullable)
+            console.log(`Nullable ints are not supported, intepreting as a regular int: ${type.idlType}`);
         return `  init var arg${argNum} JSInt\n`;
+    }
     else if (STRING_TYPES.includes(type.idlType))
-        return `  init var arg${argNum} JSString\n`;
+        if (type.nullable)
+            return `  if dup NULL ptr!= do
+    init var arg${argNum} JSString
+  else
+    arg${argNum} (JSNull) .__init__
+  end\n`;
+        else
+            return `init var arg${argNum} JSString\n`;
     else
-        return `  let arg${argNum};\n`;
+        if (type.nullable)
+            return `  if dup NULL ptr== do
+    drop init var null${argNum} JSNull null
+  end let arg${argNum};\n`;
+        else
+            return `let arg${argNum}\n`;
 }
 
 /**
@@ -145,14 +200,31 @@ function loadFromJS(type) {
     }
     if (type.union || FORCE_JS_VALUE.includes(type.idlType))
         return "";
-    else if (INT_TYPES.includes(type.idlType))
+    else if (INT_TYPES.includes(type.idlType)) {
+        if (type.nullable)
+            console.log(`Nullable ints are not supported, intepreting as a regular int: ${type.idlType}`);
         return "  JSInt.unwrap let res; res.value res.free\n";
-    else if (STRING_TYPES.includes(type.idlType))
-        return `  JSString.unwrap let res; res.value res free\n`;
+    } else if (STRING_TYPES.includes(type.idlType))
+        if (type.nullable)
+            return `  let res;
+  if JSTypes.Null res.type == do
+    res.free -1 NULL
+  else
+    res JSString.unwrap let string; string.value string free
+  end\n`;
+        else return `JSString.unwrap let res; res.value res free\n`;
     else if (type.idlType === "undefined")
         return "  .free\n";
     else
-        return `  ${namePrefix}${type.idlType}.full_unwrap\n`;
+        if (type.nullable)
+            return `  let res;
+  if JSTypes.Null res.type == do
+    res.free NULL
+  else
+    res ${namePrefix}${type.idlType}.unwrap
+  end\n`;
+        else
+            return "";
 }
 
 /**
