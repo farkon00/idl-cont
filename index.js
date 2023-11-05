@@ -85,7 +85,7 @@ end\n`;
  */
 function typeToCont(type, isReturn) {
     if (type.generic) {
-        console.log(`Generic types are not supported: ${type.idlType}`);
+        console.log(`Generic types are not supported: ${type.generic}`);
         return "";
     }
     let prefix = isReturn ? "-> " : ""; 
@@ -113,7 +113,7 @@ function typeToCont(type, isReturn) {
  */
 function loadIntoJS(type, argNum) {
     if (type.generic) {
-        console.log(`Generic types are not supported: ${type.idlType}`);
+        console.log(`Generic types are not supported: ${type.generic}`);
         return "";
     }
     if (type.union || type.idlType == "undefined")
@@ -132,7 +132,7 @@ function loadIntoJS(type, argNum) {
  */
 function loadFromJS(type) {
     if (type.generic) {
-        console.log(`Generic types are not supported: ${type.idlType}`);
+        console.log(`Generic types are not supported: ${type.generic}`);
         return "";
     }
     if (type.union)
@@ -148,7 +148,31 @@ function loadFromJS(type) {
 }
 
 /**
+ * 
+ * @param {WebIDL2.OperationMemberType | WebIDL2.ConstructorMemberType} member 
+ * @param {string} declName 
+ * @returns {[string, string, string, number]}
+ */
+function handleArguments(member, declName) {
+    let argumentTypes = "";
+    let argumentsPassing = "  ";
+    let i = 0;
+    for (; i < member.arguments.length; i++) {
+        if (member.arguments[i].optional) break;
+        if (member.arguments[i].variadic)
+            console.log(`Variadic arguments are not supported, treating it as a regular argument: ${declName}.${member.name}`);
+        argumentTypes += typeToCont(member.arguments[i].idlType, false);
+        argumentsPassing += `arg${i} `;
+    }
+    let argumentsLoading = "";
+    for (let j = i - 1; j >= 0; j--)
+        argumentsLoading += loadIntoJS(member.arguments[j].idlType, j);
+    return [argumentTypes, argumentsLoading, argumentsPassing, i];
+}
+
+/**
  * @param {WebIDL2.InterfaceType} decl
+ * @returns {[string, string]}
  */
 function handleInterface(decl) {
     let parent = decl.inheritance ? `${namePrefix}${decl.inheritance}` : "JSObject"
@@ -183,24 +207,30 @@ end\n`;
                 return;
             }
             afterOutput += `sproc [${namePrefix}${decl.name}] ${toSnakeCase(member.name)} `;
-            let argumentsLoading = "";
-            let argumentsPassing = "  ";
-            let i = 0
-            for (; i < member.arguments.length; i++) {
-                if (member.arguments[i].optional) break;
-                if (member.arguments[i].variadic)
-                    console.log(`Variadic arguments are not supported, treating it as a regular argument: ${decl.name}.${member.name}`);
-                afterOutput += typeToCont(member.arguments[i].idlType, false);
-                argumentsLoading += loadIntoJS(member.arguments[i].idlType, i);
-                argumentsPassing += `arg${i} `;
-            }
+            const [argumentsTypes, argumentsLoading, argumentsPassing, argumentCount] = handleArguments(member, decl.name);
+            afterOutput += argumentsTypes;
             afterOutput += typeToCont(member.idlType, true);
             afterOutput += ":\n";
             afterOutput += argumentsLoading;
             afterOutput += argumentsPassing;
-            afterOutput += `"${member.name}" self.call_method${i}\n`;
+            afterOutput += `"${member.name}" self.call_method${argumentCount}\n`;
             afterOutput += loadFromJS(member.idlType);
             afterOutput += "end\n";
+        } else if (member.type == "constructor") {
+            afterOutput += `sproc [${namePrefix}${decl.name}] __init__ `;
+            const [argumentsTypes, argumentsLoading, argumentsPassing, argumentCount] = handleArguments(member, decl.name);
+            afterOutput += argumentsTypes;
+            afterOutput += ":\n";
+            afterOutput += `  JSTypes.Object !self.type
+  var args [${argumentCount + 1}] JSValue
+  NULL ${argumentCount} args *[] !\n`
+            afterOutput += argumentsLoading;
+            afterOutput += argumentsPassing + "\n";
+            for (let i = argumentCount - 1; i >= 0; i--)
+                afterOutput += `  ${i} args *[] !\n`
+            afterOutput += `  args ([DYNAMIC_ARRAY_SIZE]) JSValue
+  "${decl.name}" JSObject.construct dup .object_id !self.object_id free
+end\n`;
         } else
             console.log(`Unknown member type: ${member.type} for ${decl.name}.${member.name}`);
     });
