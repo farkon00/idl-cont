@@ -61,7 +61,7 @@ end\n`;
   "${member.name}" self.get JSInt.unwrap dup .value swap .free
 end\n`;
         if (!member.readonly)
-            output += `  sproc [${owner}] !${toSnakeCase(member.name)} int:
+            output += `sproc [${owner}] !${toSnakeCase(member.name)} int:
   init var value JSInt
   value "${member.name}" self.set
 end\n`;
@@ -70,7 +70,7 @@ end\n`;
   "${member.name}" self.get JSString.unwrap let string; string.value string free
 end\n`;
         if (!member.readonly)
-            output += `  sproc [${owner}] !${toSnakeCase(member.name)} @str:
+            output += `sproc [${owner}] !${toSnakeCase(member.name)} @str:
   init var value JSString
   value "${member.name}" self.set
 end\n`;
@@ -79,7 +79,7 @@ end\n`;
   "${member.name}" self.get ${namePrefix}${member.idlType.idlType}.full_unwrap
 end\n`;
         if (!member.readonly)
-            output += `  sproc [${owner}] !${toSnakeCase(member.name)} ${namePrefix}${member.idlType.idlType}:
+            output += `sproc [${owner}] !${toSnakeCase(member.name)} ${namePrefix}${member.idlType.idlType}:
   "${member.name}" self.set
 end\n`;
     }
@@ -183,7 +183,7 @@ function handleArguments(member, declName) {
  * @returns {[string, string]}
  */
 function handleInterface(decl) {
-    let parent = decl.inheritance ? `${namePrefix}${decl.inheritance}` : "JSObject"
+    let parent = decl.inheritance ? `${namePrefix}${decl.inheritance}` : "JSObject";
     let output = `struct (${parent}) ${namePrefix}${decl.name}
   static nproc unwrap JSObject self -> ${namePrefix}${decl.name}:
     "${decl.name}" self.unwrap_as (${namePrefix}${decl.name})
@@ -214,6 +214,7 @@ end\n`;
                 console.log(`Static attributes are not supported: ${decl.name}.${member.name}`);
                 return;
             }
+            if (member.special == "stringifier") return;
             afterOutput += `sproc [${namePrefix}${decl.name}] ${toSnakeCase(member.name)} `;
             const [argumentsTypes, argumentsLoading, argumentsPassing, argumentCount] = handleArguments(member, decl.name);
             afterOutput += argumentsTypes;
@@ -250,7 +251,7 @@ function handleDeclaration(decl) {
         return handleInterface(decl);
     else {
         console.log(`Unknown declaration type: ${decl.type} for ${decl.name}`);
-        return "";
+        return ["", ""];
     }
 }
 
