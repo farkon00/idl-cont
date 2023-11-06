@@ -80,9 +80,9 @@ end\n`;
             if (!member.readonly)
                 output += `nproc [${owner}] !${toSnakeCase(member.name)} @str:
   if data NULL ptr== do
-    init var null JSNull null
+    init var null JSNull null (JSValue)
   else
-    len data init var value JSString value
+    len data init var value JSString value (JSValue)
   end
   "${member.name}" self.set
 end\n`;
@@ -99,7 +99,7 @@ end\n`;
         }
     } else {
         if (member.idlType.nullable) {
-            output += `@str:
+            output += `${namePrefix}${member.idlType.idlType}:
   "${member.name}" self.get let res;
   if JSTypes.Null res.type == do
     res.free NULL
@@ -111,8 +111,8 @@ end\n`;
                 output += `nproc [${owner}] !${toSnakeCase(member.name)} ${namePrefix}${member.idlType.idlType} val:
   if NULL val ptr== do
     init var null JSNull
-    null
-  else val end
+    null (JSValue)
+  else val (JSValue) end
   "${member.name}" self.set
 end\n`;
         } else {
@@ -176,17 +176,17 @@ function loadIntoJS(type, argNum) {
             return `  if dup NULL ptr!= do
     init var arg${argNum} JSString
   else
-    arg${argNum} (JSNull) .__init__
+    drop drop arg${argNum} (JSNull) .__init__
   end\n`;
         else
-            return `init var arg${argNum} JSString\n`;
+            return `  init var arg${argNum} JSString\n`;
     else
         if (type.nullable)
             return `  if dup NULL ptr== do
-    drop init var null${argNum} JSNull null
+    drop init var null${argNum} JSNull null${argNum} (JSValue)
   end let arg${argNum};\n`;
         else
-            return `let arg${argNum}\n`;
+            return `  let arg${argNum};\n`;
 }
 
 /**
@@ -221,7 +221,7 @@ function loadFromJS(type) {
   if JSTypes.Null res.type == do
     res.free NULL
   else
-    res ${namePrefix}${type.idlType}.unwrap
+    res ${namePrefix}${type.idlType}.full_unwrap
   end\n`;
         else
             return "";
@@ -230,24 +230,23 @@ function loadFromJS(type) {
 /**
  * 
  * @param {WebIDL2.OperationMemberType | WebIDL2.ConstructorMemberType} member 
- * @param {string} declName 
- * @returns {[string, string, string, number]}
+ * @param {string} declName
+ * @param {number} argCount  
+ * @returns {[string, string, string]}
  */
-function handleArguments(member, declName) {
+function handleArguments(member, argCount, declName) {
     let argumentTypes = "";
     let argumentsPassing = "  ";
-    let i = 0;
-    for (; i < member.arguments.length; i++) {
-        if (member.arguments[i].optional) break;
+    for (let i = 0; i < argCount; i++) {
         if (member.arguments[i].variadic)
             console.log(`Variadic arguments are not supported, treating it as a regular argument: ${declName}.${member.name}`);
         argumentTypes += typeToCont(member.arguments[i].idlType, false);
         argumentsPassing += `arg${i} `;
     }
     let argumentsLoading = "";
-    for (let j = i - 1; j >= 0; j--)
+    for (let j = argCount - 1; j >= 0; j--)
         argumentsLoading += loadIntoJS(member.arguments[j].idlType, j);
-    return [argumentTypes, argumentsLoading, argumentsPassing, i];
+    return [argumentTypes, argumentsLoading, argumentsPassing];
 }
 
 /**
@@ -287,31 +286,41 @@ end\n`;
                 return;
             }
             if (member.special == "stringifier") return;
-            afterOutput += `sproc [${namePrefix}${decl.name}] ${toSnakeCase(member.name)} `;
-            const [argumentsTypes, argumentsLoading, argumentsPassing, argumentCount] = handleArguments(member, decl.name);
-            afterOutput += argumentsTypes;
-            afterOutput += typeToCont(member.idlType, true);
-            afterOutput += ":\n";
-            afterOutput += argumentsLoading;
-            afterOutput += argumentsPassing;
-            afterOutput += `"${member.name}" self.call_method${argumentCount}\n`;
-            afterOutput += loadFromJS(member.idlType);
-            afterOutput += "end\n";
+            let requiredArgsCount = member.arguments.findIndex((val) => val.optional);
+            requiredArgsCount = requiredArgsCount >= 0 ? requiredArgsCount : member.arguments.length;
+            for (let argCount = requiredArgsCount; argCount <= member.arguments.length; argCount++) {
+                let variantSuffix = argCount == requiredArgsCount ? "" : argCount;
+                afterOutput += `sproc [${namePrefix}${decl.name}] ${toSnakeCase(member.name)}${variantSuffix} `;
+                const [argumentsTypes, argumentsLoading, argumentsPassing] = handleArguments(member, argCount, decl.name);
+                afterOutput += argumentsTypes;
+                afterOutput += typeToCont(member.idlType, true);
+                afterOutput += ":\n";
+                afterOutput += argumentsLoading;
+                afterOutput += argumentsPassing;
+                afterOutput += `"${member.name}" self.call_method${argCount}\n`;
+                afterOutput += loadFromJS(member.idlType);
+                afterOutput += "end\n";
+            }
         } else if (member.type === "constructor") {
-            afterOutput += `sproc [${namePrefix}${decl.name}] __init__ `;
-            const [argumentsTypes, argumentsLoading, argumentsPassing, argumentCount] = handleArguments(member, decl.name);
-            afterOutput += argumentsTypes;
-            afterOutput += ":\n";
-            afterOutput += `  JSTypes.Object !self.type
-  var args [${argumentCount + 1}] JSValue
-  NULL ${argumentCount} args *[] !\n`
-            afterOutput += argumentsLoading;
-            afterOutput += argumentsPassing + "\n";
-            for (let i = argumentCount - 1; i >= 0; i--)
-                afterOutput += `  ${i} args *[] !\n`
-            afterOutput += `  args ([DYNAMIC_ARRAY_SIZE]) JSValue
+            let requiredArgsCount = member.arguments.findIndex((val) => val.optional);
+            requiredArgsCount = requiredArgsCount >= 0 ? requiredArgsCount : member.arguments.length - 1;
+            for (let argCount = requiredArgsCount; argCount <= member.arguments.length; argCount++) {
+                let variantSuffix = argCount == requiredArgsCount ? "" : argCount;
+                afterOutput += `sproc [${namePrefix}${decl.name}] __init${variantSuffix}__ `;
+                const [argumentsTypes, argumentsLoading, argumentsPassing] = handleArguments(member, argCount, decl.name);
+                afterOutput += argumentsTypes;
+                afterOutput += ":\n";
+                afterOutput += `  JSTypes.Object !self.type
+  var args [${argCount + 1}] JSValue
+  NULL ${argCount} args *[] !\n`
+                afterOutput += argumentsLoading;
+                afterOutput += argumentsPassing + "\n";
+                for (let i = argCount - 1; i >= 0; i--)
+                    afterOutput += `  ${i} args *[] !\n`
+                afterOutput += `  args ([DYNAMIC_ARRAY_SIZE]) JSValue
   "${decl.name}" JSObject.construct dup .object_id !self.object_id free
 end\n`;
+            }
         } else
             console.log(`Unknown member type: ${member.type} for ${decl.name}.${member.name}`);
     });
