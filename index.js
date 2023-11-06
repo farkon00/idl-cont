@@ -327,9 +327,21 @@ end\n`;
     return [output, afterOutput];
 }
 
+/**
+ * 
+ * @param {WebIDL2.IDLRootType} decl 
+ * @returns 
+ */
 function handleDeclaration(decl) {
     if (decl.type === "interface")
         return handleInterface(decl);
+    else if (decl.type === "enum") {
+        let output = "";
+        decl.values.forEach(val => {
+            output += `proc ${namePrefix}${decl.name}.${val.value} -> @str: "${val.value}" end\n`;
+        });
+        return [output, ""];
+    }
     else {
         console.log(`Unknown declaration type: ${decl.type} for ${decl.name}`);
         return ["", ""];
