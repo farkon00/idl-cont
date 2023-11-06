@@ -251,9 +251,11 @@ function handleArguments(member, argCount, declName) {
 
 /**
  * @param {WebIDL2.InterfaceType} decl
+ * @param {Record<string, WebIDL2.IDLInterfaceMixinMemberType[]>} mixins
+ * @param {Record<string, string[]>} includes   
  * @returns {[string, string]}
  */
-function handleInterface(decl) {
+function handleInterface(decl, mixins, includes) {
     let parent = decl.inheritance ? `${namePrefix}${decl.inheritance}` : "JSObject";
     let output = `struct (${parent}) ${namePrefix}${decl.name}
   static nproc unwrap JSObject self -> ${namePrefix}${decl.name}:
@@ -264,7 +266,14 @@ function handleInterface(decl) {
   end
 end\n`;
     let afterOutput = "";
-    decl.members.forEach(member => {
+    let members = decl.members;
+    if (decl.name in includes)
+        includes[decl.name].forEach(mixinName => {
+            if (mixinName in mixins)
+                members.push(...mixins[mixinName]);
+            else console.log(`Included mixin not found: ${mixinName}`);
+        });
+    members.forEach(member => {
         if (member.type === "attribute") {
             if (member.special === "static") {
                 console.log(`Static attributes are not supported: ${decl.name}.${member.name}`);
@@ -329,12 +338,14 @@ end\n`;
 
 /**
  * 
- * @param {WebIDL2.IDLRootType} decl 
- * @returns 
+ * @param {WebIDL2.IDLRootType} decl
+ * @param {Record<string, WebIDL2.IDLInterfaceMixinMemberType[]>} mixins
+ * @param {Record<string, string[]>} includes   
+ * @returns [string, string]
  */
-function handleDeclaration(decl) {
+function handleDeclaration(decl, mixins, includes) {
     if (decl.type === "interface")
-        return handleInterface(decl);
+        return handleInterface(decl, mixins, includes);
     else if (decl.type === "enum") {
         let output = "";
         decl.values.forEach(val => {
@@ -342,16 +353,25 @@ function handleDeclaration(decl) {
         });
         return [output, ""];
     }
+    else if (decl.type === "interface mixin")
+        mixins[decl.name] = decl.members;
+    else if (decl.type === "includes")
+        if (decl.target in includes)
+            includes[decl.target].push(decl.includes);
+        else
+            includes[decl.target] = [decl.includes];
     else {
         console.log(`Unknown declaration type: ${decl.type} for ${decl.name}`);
-        return ["", ""];
     }
+    return ["", ""];
 }
 
 function main() {
+    let mixins = {};
+    let includes = {};
     const tree = parse(readFileSync(process.argv[2], "utf-8"));
     
-    const declarations = tree.map(handleDeclaration);
+    const declarations = tree.map((x) => handleDeclaration(x, mixins, includes));
     const res = declarations.reduce((prev, elem) => [prev[0] + elem[0], prev[1] + elem[1]]);
     writeFileSync(process.argv[3], res[0] + res[1])
     console.log("Finished");
