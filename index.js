@@ -44,7 +44,7 @@ function toSnakeCase(originalName) {
 
 /**
  * @param {WebIDL2.AttributeMemberType} member 
- * @param {string} owner
+ * @param {string} owner 
  */
 function handleInterfaceAttribute(member, owner) {
     let output = "";
@@ -248,14 +248,33 @@ function handleArguments(member, argCount, declName) {
         argumentsLoading += loadIntoJS(member.arguments[j].idlType, j);
     return [argumentTypes, argumentsLoading, argumentsPassing];
 }
+/**
+ * @param {WebIDL2.IDLInterfaceMemberType} member 
+ * @param {Record<string, WebIDL2.IDLTypeDescription>} typedefs 
+ */
+function handleTypedefs(member, typedefs) {
+    if (member.type === "attribute" || member.type === "const") {
+        if (member.idlType.idlType in typedefs)
+            member.idlType = typedefs[member.idlType.idlType];
+    } else if (member.type === "constructor" || member.type === "operation") {
+        if (member.type === "operation" && member.special !== "stringifier" && member.idlType.idlType in typedefs)
+            member.idlType = typedefs[member.idlType.idlType];
+        member.arguments.forEach((arg, index) => {
+            if (arg.idlType.idlType in typedefs)
+                member.arguments[index].idlType = typedefs[arg.idlType.idlType]
+        });
+    } else
+        console.log(`Unsupported member type for handleTypedefs: ${member.type}`); 
+}
 
 /**
  * @param {WebIDL2.InterfaceType} decl
  * @param {Record<string, WebIDL2.IDLInterfaceMixinMemberType[]>} mixins
- * @param {Record<string, string[]>} includes   
+ * @param {Record<string, string[]>} includes
+ * @param {Record<string, WebIDL2.IDLTypeDescription>} typedefs    
  * @returns {[string, string]}
  */
-function handleInterface(decl, mixins, includes) {
+function handleInterface(decl, mixins, includes, typedefs) {
     let parent = decl.inheritance ? `${namePrefix}${decl.inheritance}` : "JSObject";
     let output = `struct (${parent}) ${namePrefix}${decl.name}
   static nproc unwrap JSObject self -> ${namePrefix}${decl.name}:
@@ -274,6 +293,7 @@ end\n`;
             else console.log(`Included mixin not found: ${mixinName}`);
         });
     members.forEach(member => {
+        handleTypedefs(member, typedefs);
         if (member.type === "attribute") {
             if (member.special === "static") {
                 console.log(`Static attributes are not supported: ${decl.name}.${member.name}`);
@@ -294,11 +314,11 @@ end\n`;
                 console.log(`Static attributes are not supported: ${decl.name}.${member.name}`);
                 return;
             }
-            if (member.special == "stringifier") return;
+            if (member.special === "stringifier") return;
             let requiredArgsCount = member.arguments.findIndex((val) => val.optional);
             requiredArgsCount = requiredArgsCount >= 0 ? requiredArgsCount : member.arguments.length;
             for (let argCount = requiredArgsCount; argCount <= member.arguments.length; argCount++) {
-                let variantSuffix = argCount == requiredArgsCount ? "" : argCount;
+                let variantSuffix = argCount === requiredArgsCount ? "" : argCount;
                 afterOutput += `sproc [${namePrefix}${decl.name}] ${toSnakeCase(member.name)}${variantSuffix} `;
                 const [argumentsTypes, argumentsLoading, argumentsPassing] = handleArguments(member, argCount, decl.name);
                 afterOutput += argumentsTypes;
@@ -314,7 +334,7 @@ end\n`;
             let requiredArgsCount = member.arguments.findIndex((val) => val.optional);
             requiredArgsCount = requiredArgsCount >= 0 ? requiredArgsCount : member.arguments.length - 1;
             for (let argCount = requiredArgsCount; argCount <= member.arguments.length; argCount++) {
-                let variantSuffix = argCount == requiredArgsCount ? "" : argCount;
+                let variantSuffix = argCount === requiredArgsCount ? "" : argCount;
                 afterOutput += `sproc [${namePrefix}${decl.name}] __init${variantSuffix}__ `;
                 const [argumentsTypes, argumentsLoading, argumentsPassing] = handleArguments(member, argCount, decl.name);
                 afterOutput += argumentsTypes;
@@ -341,11 +361,12 @@ end\n`;
  * @param {WebIDL2.IDLRootType} decl
  * @param {Record<string, WebIDL2.IDLInterfaceMixinMemberType[]>} mixins
  * @param {Record<string, string[]>} includes   
+ * @param {Record<string, WebIDL2.IDLTypeDescription>} typedefs 
  * @returns [string, string]
  */
-function handleDeclaration(decl, mixins, includes) {
+function handleDeclaration(decl, mixins, includes, typedefs) {
     if (decl.type === "interface")
-        return handleInterface(decl, mixins, includes);
+        return handleInterface(decl, mixins, includes, typedefs);
     else if (decl.type === "enum") {
         let output = "";
         decl.values.forEach(val => {
@@ -360,18 +381,20 @@ function handleDeclaration(decl, mixins, includes) {
             includes[decl.target].push(decl.includes);
         else
             includes[decl.target] = [decl.includes];
-    else {
+    else if (decl.type == "typedef")
+        typedefs[decl.name] = decl.idlType;
+    else
         console.log(`Unknown declaration type: ${decl.type} for ${decl.name}`);
-    }
     return ["", ""];
 }
 
 function main() {
     let mixins = {};
     let includes = {};
+    let typedefs = {};
     const tree = parse(readFileSync(process.argv[2], "utf-8"));
     
-    const declarations = tree.map((x) => handleDeclaration(x, mixins, includes));
+    const declarations = tree.map((x) => handleDeclaration(x, mixins, includes, typedefs));
     const res = declarations.reduce((prev, elem) => [prev[0] + elem[0], prev[1] + elem[1]]);
     writeFileSync(process.argv[3], res[0] + res[1])
     console.log("Finished");
