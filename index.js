@@ -1,6 +1,7 @@
 const { parse } = require("webidl2");
 const process = require('node:process');
 const { readFileSync, writeFileSync } = require("fs");
+const { type } = require("node:os");
 
 const namePrefix = process.argv[4];
 
@@ -268,6 +269,65 @@ function handleTypedefs(member, typedefs) {
 }
 
 /**
+ * 
+ * @param {WebIDL2.DictionaryType} decl 
+ * @returns {[WebIDL2.InterfaceType, string]}
+ */
+function dictionaryToInterface(decl) {
+    /** @type {WebIDL2.InterfaceType} */
+    let res = {
+        type: "interface",
+        name: decl.name, 
+        members: [], 
+        inheritance: decl.inheritance,
+        parent: null,
+        partial: decl.partial,
+        extAttrs: decl.extAttrs
+    };
+    let constructor = `sproc [${namePrefix}${decl.name}] __init__ `;
+    let constructor_body = `:
+  JSTypes.Object !self.type\n`;
+    let eval_string = "({";
+    let required_count = 0;
+    let arg_types = []
+    decl.members.forEach(member => {
+        if (member.type != "field") {
+            console.log(`Dictionary member isn't a field: ${member.type}`)
+            return;
+        }
+        /** @type {WebIDL2.AttributeMemberType} */
+        let attr = {
+            type: "attribute",
+            name: member.name,
+            idlType: member.idlType,
+            readonly: false,
+            special: null,
+            parent: res,
+            inherit: false,
+            extAttrs: member.extAttrs
+        };
+        res.members.push(attr);
+        if (member.required) {
+            constructor += typeToCont(member.idlType, false);
+            eval_string += `${member.name} : args[${required_count}],`;
+            required_count++;
+            arg_types.push(member.idlType);
+        }
+    });
+    constructor_body += `  var args [${required_count}] JSValue
+    ${required_count} args ([DYNAMIC_ARRAY_SIZE]) JSValue init var js_args JSArray\n`;
+    for (let i = required_count - 1; i >= 0; i--) {
+        constructor_body += loadIntoJS(arg_types[i], i);
+        constructor_body += `  arg${i} ${i} args *[] !\n`;
+    }
+    eval_string += "})";
+    constructor_body += `  "${eval_string}" js_args __js_eval
+  dup JSObject.unwrap .object_id !self.object_id free
+end\n`;
+    return [res, constructor + constructor_body];
+}
+
+/**
  * @param {WebIDL2.InterfaceType} decl
  * @param {Record<string, WebIDL2.IDLInterfaceMixinMemberType[]>} mixins
  * @param {Record<string, string[]>} includes
@@ -381,7 +441,11 @@ function handleDeclaration(decl, mixins, includes, typedefs) {
             includes[decl.target].push(decl.includes);
         else
             includes[decl.target] = [decl.includes];
-    else if (decl.type == "typedef")
+    else if (decl.type == "dictionary") {
+        let [interface, constructor] = dictionaryToInterface(decl);
+        let [output, afterOutput] = handleInterface(interface, mixins, includes, typedefs);
+        return [output, afterOutput + constructor];
+    } else if (decl.type == "typedef")
         typedefs[decl.name] = decl.idlType;
     else
         console.log(`Unknown declaration type: ${decl.type} for ${decl.name}`);
